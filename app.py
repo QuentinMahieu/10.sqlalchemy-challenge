@@ -37,9 +37,11 @@ def home():
         func.min(Measurement.date)).first()[0]
     max_date = session.query(
         func.max(Measurement.date)).first()[0]
+
+    session.close()
     return (
         f"Available Routes:<br/>"
-        f"/api/v1.0/precipitation/date<br/>"
+        f"/api/v1.0/precipitation<br/>"
         f"/api/v1.0/stations<br/>"
         f"/api/v1.0/tobs<br>"
         f"/api/v1.0/start_date<br>"
@@ -49,22 +51,26 @@ def home():
         f"choose dates between {min_date} and {max_date}"
     )
 
-@app.route("/api/v1.0/precipitation/<date>")
-def precipitation(date):
+@app.route("/api/v1.0/precipitation")
+def precipitation():
     #create the session
     session = Session(engine)
-    #calcul the precipitation for a give date
-    datadates = [dates[0] for dates in session.query(Measurement.date).all()]
-    if date not in datadates:
-        return jsonify({"error": f"{date} not found."}), 404
-    #convert the input date
-    date = converter(date)
-    result = session.query(Measurement.prcp).\
-            filter(func.strftime('%Y-%m-%d',Measurement.date) == date).first()
-    
+    #precipitations for the last 12 months
+    import datetime as dt
+    from datetime import datetime as dtt
+    query_date = dtt.strptime(session.query(func.max(Measurement.date)).\
+                first()[0], '%Y-%m-%d') - dt.timedelta(days=365)
+    date = dtt.strftime(query_date,'%Y-%m-%d')
+    results = session.query(Measurement.date,Measurement.prcp).\
+            filter(func.strftime('%Y-%m-%d',Measurement.date) >= date).\
+            filter(Measurement.prcp.isnot(None)).all()
+    results_dic = {}
+    for date,prcp in results:
+        results_dic[date] = prcp
+
     session.close()
 
-    return jsonify(result)
+    return jsonify(results_dic)
 
 @app.route("/api/v1.0/stations")
 def stations():
@@ -73,15 +79,20 @@ def stations():
     results = session.query(Station.name, Measurement.station).\
         filter(Station.station == Measurement.station).\
         group_by(Station.name).all()
+    results_dic = {}
+    for name, station in results:
+        results_dic[name] = station
+
     session.close()
-    return jsonify(results)
+    return jsonify(results_dic)
 
 @app.route("/api/v1.0/tobs")
 def tobs():
     session = Session(engine)
     #search for the date that represent the last 12 months
+    import datetime as dt
     from datetime import datetime as dtt
-    query_date = dt.datetime.strptime(session.query(func.max(Measurement.date)).\
+    query_date = dtt.strptime(session.query(func.max(Measurement.date)).\
                 first()[0], '%Y-%m-%d') - dt.timedelta(days=365)
     date = dtt.strftime(query_date,'%Y-%m-%d')
     #search for most active station for the last 12 months
@@ -92,9 +103,13 @@ def tobs():
         filter_by(station = query_station).\
             filter(Measurement.date >= date).\
                 order_by('date').all()
+    results_dic = {}
+    for date,tobs in results:
+        results_dic[date] = tobs
+        
     session.close()
 
-    return jsonify(results)
+    return jsonify(results_dic)
 
 @app.route("/api/v1.0/<start_date>")
 def averages_start(start_date):
@@ -108,7 +123,7 @@ def averages_start(start_date):
     results = session.query(func.min(Measurement.tobs),func.avg(
             Measurement.tobs),func.max(Measurement.tobs)).\
             filter(Measurement.date >= date).all()
-
+    session.close()
     return jsonify(
         f"TMIN: {results[0][0]}",
         f"TAVG: {results[0][1]}",
@@ -131,7 +146,7 @@ def averages_duration(start_date,end_date):
             Measurement.tobs),func.max(Measurement.tobs)).\
             filter(Measurement.date >= startdate).\
             filter(Measurement.date <= enddate).all()
-
+    session.close()
     return jsonify(
         f"TMIN: {results[0][0]}",
         f"TAVG: {results[0][1]}",
